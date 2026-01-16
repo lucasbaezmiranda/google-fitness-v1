@@ -1,8 +1,8 @@
 package com.example.googlefitnessactivity
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.Location
 import android.os.Bundle
 import android.util.Log
 import android.widget.TextView
@@ -10,134 +10,228 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
-import com.google.android.gms.location.ActivityRecognition
-import com.google.android.gms.location.ActivityRecognitionClient
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 
 class MainActivity : AppCompatActivity() {
     
-    private lateinit var activityRecognitionClient: ActivityRecognitionClient
-    private lateinit var pendingIntent: android.app.PendingIntent
-    private lateinit var activityTextView: TextView
-    private lateinit var confidenceTextView: TextView
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private lateinit var latitudeTextView: TextView
+    private lateinit var longitudeTextView: TextView
+    private lateinit var accuracyTextView: TextView
+    private lateinit var altitudeTextView: TextView
+    private lateinit var speedTextView: TextView
     private lateinit var permissionStatusTextView: TextView
-    private lateinit var apiStatusTextView: TextView
+    private lateinit var gpsStatusTextView: TextView
     private lateinit var updatesCountTextView: TextView
     private lateinit var lastLogTextView: TextView
     
     private var updatesCount = 0
     private val requestCode = 123
     private val TAG = "MainActivity"
+    private val cancellationTokenSource = CancellationTokenSource()
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         
-        activityTextView = findViewById(R.id.activityTextView)
-        confidenceTextView = findViewById(R.id.confidenceTextView)
+        latitudeTextView = findViewById(R.id.latitudeTextView)
+        longitudeTextView = findViewById(R.id.longitudeTextView)
+        accuracyTextView = findViewById(R.id.accuracyTextView)
+        altitudeTextView = findViewById(R.id.altitudeTextView)
+        speedTextView = findViewById(R.id.speedTextView)
         permissionStatusTextView = findViewById(R.id.permissionStatusTextView)
-        apiStatusTextView = findViewById(R.id.apiStatusTextView)
+        gpsStatusTextView = findViewById(R.id.gpsStatusTextView)
         updatesCountTextView = findViewById(R.id.updatesCountTextView)
         lastLogTextView = findViewById(R.id.lastLogTextView)
+        
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         
         // Verificar Google Play Services
         checkGooglePlayServices()
         
         // Verificar y solicitar permisos
-        val hasPermission = ContextCompat.checkSelfPermission(
+        checkLocationPermission()
+    }
+    
+    private fun checkLocationPermission() {
+        val hasFineLocation = ContextCompat.checkSelfPermission(
             this,
-            Manifest.permission.ACTIVITY_RECOGNITION
+            Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
+        
+        val hasCoarseLocation = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        
+        val hasPermission = hasFineLocation || hasCoarseLocation
         
         updatePermissionStatus(hasPermission)
         
         if (!hasPermission) {
-            Log.d(TAG, "Solicitando permiso ACTIVITY_RECOGNITION")
-            logStatus("Solicitando permiso ACTIVITY_RECOGNITION...")
+            Log.d(TAG, "Solicitando permisos de ubicación")
+            logStatus("Solicitando permisos de ubicación...")
             ActivityCompat.requestPermissions(
                 this,
-                arrayOf(Manifest.permission.ACTIVITY_RECOGNITION),
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ),
                 requestCode
             )
         } else {
-            Log.d(TAG, "Permiso ACTIVITY_RECOGNITION ya concedido")
-            logStatus("Permiso concedido. Iniciando Activity Recognition...")
-            startActivityRecognition()
+            Log.d(TAG, "Permisos de ubicación ya concedidos")
+            logStatus("Permisos concedidos. Obteniendo ubicación...")
+            startLocationUpdates()
+        }
+    }
+    
+    private fun startLocationUpdates() {
+        if (!hasLocationPermission()) {
+            logStatus("Sin permisos de ubicación")
+            return
         }
         
-        // Registrar receiver para actualizaciones locales
-        LocalBroadcastManager.getInstance(this).registerReceiver(
-            activityUpdateReceiver,
-            android.content.IntentFilter(ActivityRecognitionReceiver.ACTION_ACTIVITY_UPDATE)
-        )
-    }
-    
-    private val activityUpdateReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context?, intent: Intent?) {
-            val activityType = intent?.getStringExtra(ActivityRecognitionReceiver.EXTRA_ACTIVITY_TYPE) ?: ""
-            val confidence = intent?.getIntExtra(ActivityRecognitionReceiver.EXTRA_CONFIDENCE, 0) ?: 0
-            
-            updatesCount++
-            Log.d(TAG, "Actividad recibida: $activityType con confianza: $confidence%")
-            logStatus("Actividad detectada: $activityType ($confidence%)")
-            updateUI(activityType, confidence)
-            updateUpdatesCount()
-        }
-    }
-    
-    private fun updateUI(activityType: String, confidence: Int) {
-        activityTextView.text = getActivityText(activityType)
-        confidenceTextView.text = getString(R.string.confidence, confidence)
-    }
-    
-    private fun getActivityText(activityType: String): String {
-        return when (activityType) {
-            "STILL" -> "Quieto / Descansando"
-            "WALKING" -> "Caminando"
-            "RUNNING" -> "Corriendo"
-            "ON_FOOT" -> "A pie"
-            "ON_BICYCLE" -> "En bicicleta"
-            "IN_VEHICLE" -> "En vehículo"
-            "TILTING" -> "Inclinando dispositivo"
-            "UNKNOWN" -> getString(R.string.activity_unknown)
-            else -> getString(R.string.activity_unknown)
-        }
-    }
-    
-    private fun startActivityRecognition() {
         try {
-            activityRecognitionClient = ActivityRecognition.getClient(this)
-            val intent = Intent(this, ActivityRecognitionReceiver::class.java)
-            pendingIntent = android.app.PendingIntent.getBroadcast(
-                this,
-                0,
-                intent,
-                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            updateGpsStatus("Obteniendo ubicación...")
+            
+            // Solicitar ubicación con alta precisión
+            fusedLocationClient.getCurrentLocation(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                cancellationTokenSource.token
+            ).addOnSuccessListener { location: Location? ->
+                if (location != null) {
+                    updatesCount++
+                    Log.d(TAG, "Ubicación obtenida: lat=${location.latitude}, lng=${location.longitude}")
+                    logStatus("Ubicación actualizada (${updatesCount} actualizaciones)")
+                    updateLocationUI(location)
+                    updateGpsStatus("GPS: ✓ Activo")
+                    updateUpdatesCount()
+                } else {
+                    Log.w(TAG, "Ubicación es null")
+                    logStatus("No se pudo obtener la ubicación")
+                    updateGpsStatus("GPS: ⚠ Sin señal")
+                    
+                    // Intentar obtener última ubicación conocida
+                    getLastKnownLocation()
+                }
+            }.addOnFailureListener { e ->
+                Log.e(TAG, "Error al obtener ubicación: ${e.message}", e)
+                logStatus("Error: ${e.message}")
+                updateGpsStatus("GPS: ❌ Error")
+                
+                // Intentar obtener última ubicación conocida
+                getLastKnownLocation()
+            }
+            
+            // Configurar actualizaciones periódicas cada 5 segundos
+            requestLocationUpdates()
+            
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Error de seguridad al obtener ubicación: ${e.message}", e)
+            logStatus("Error de permisos: ${e.message}")
+            updateGpsStatus("GPS: ❌ Sin permisos")
+        }
+    }
+    
+    private fun getLastKnownLocation() {
+        if (!hasLocationPermission()) return
+        
+        try {
+            fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
+                if (location != null) {
+                    updatesCount++
+                    Log.d(TAG, "Última ubicación conocida: lat=${location.latitude}, lng=${location.longitude}")
+                    logStatus("Última ubicación conocida obtenida")
+                    updateLocationUI(location)
+                    updateGpsStatus("GPS: ✓ Última ubicación")
+                } else {
+                    logStatus("No hay ubicación disponible aún")
+                    updateGpsStatus("GPS: ⚠ Esperando señal...")
+                }
+            }
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Error de seguridad: ${e.message}", e)
+        }
+    }
+    
+    private fun requestLocationUpdates() {
+        if (!hasLocationPermission()) return
+        
+        try {
+            // Crear LocationRequest para actualizaciones periódicas
+            val locationRequest = com.google.android.gms.location.LocationRequest.Builder(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                5000 // intervalo de 5 segundos
+            ).apply {
+                setMinUpdateIntervalMillis(3000) // actualización mínima de 3 segundos
+                setMaxUpdateDelayMillis(10000) // máximo delay de 10 segundos
+            }.build()
+            
+            val locationCallback = object : com.google.android.gms.location.LocationCallback() {
+                override fun onLocationResult(locationResult: com.google.android.gms.location.LocationResult) {
+                    locationResult.lastLocation?.let { location ->
+                        updatesCount++
+                        Log.d(TAG, "Actualización periódica: lat=${location.latitude}, lng=${location.longitude}")
+                        logStatus("Actualización periódica (${updatesCount} actualizaciones)")
+                        updateLocationUI(location)
+                        updateGpsStatus("GPS: ✓ Activo")
+                        updateUpdatesCount()
+                    }
+                }
+            }
+            
+            fusedLocationClient.requestLocationUpdates(
+                locationRequest,
+                locationCallback,
+                mainLooper
             )
             
-            // Solicitar actualizaciones cada 10 segundos (mínimo recomendado: 5-10 segundos)
-            // Nota: Activity Recognition funciona mejor en dispositivos físicos
-            activityRecognitionClient.requestActivityUpdates(
-                10000, // intervalo en milisegundos (10 segundos)
-                pendingIntent
-            ).addOnSuccessListener {
-                Log.d(TAG, "Activity Recognition iniciado correctamente")
-                logStatus("Activity Recognition iniciado correctamente ✓")
-                updateApiStatus(true, null)
-                activityTextView.text = getString(R.string.activity_detecting)
-            }.addOnFailureListener { e ->
-                Log.e(TAG, "Error al iniciar Activity Recognition: ${e.message}", e)
-                val errorMsg = "Error: ${e.message}"
-                logStatus(errorMsg)
-                updateApiStatus(false, e.message)
-                Toast.makeText(this, "Error al iniciar detección de actividad: ${e.message}", Toast.LENGTH_LONG).show()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Excepción al iniciar Activity Recognition: ${e.message}", e)
-            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+            logStatus("Solicitando actualizaciones periódicas...")
+            
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Error de seguridad: ${e.message}", e)
         }
+    }
+    
+    private fun updateLocationUI(location: Location) {
+        latitudeTextView.text = "Latitud: ${String.format("%.6f", location.latitude)}°"
+        longitudeTextView.text = "Longitud: ${String.format("%.6f", location.longitude)}°"
+        
+        if (location.hasAccuracy()) {
+            accuracyTextView.text = "Precisión: ${String.format("%.1f", location.accuracy)} m"
+        } else {
+            accuracyTextView.text = "Precisión: No disponible"
+        }
+        
+        if (location.hasAltitude()) {
+            altitudeTextView.text = "Altitud: ${String.format("%.1f", location.altitude)} m"
+        } else {
+            altitudeTextView.text = "Altitud: No disponible"
+        }
+        
+        if (location.hasSpeed()) {
+            val speedKmh = location.speed * 3.6 // convertir m/s a km/h
+            speedTextView.text = "Velocidad: ${String.format("%.1f", speedKmh)} km/h"
+        } else {
+            speedTextView.text = "Velocidad: 0.0 km/h"
+        }
+    }
+    
+    private fun hasLocationPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED ||
+        ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
     }
     
     override fun onRequestPermissionsResult(
@@ -146,23 +240,26 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        val granted = requestCode == this.requestCode && grantResults.isNotEmpty() &&
-            grantResults[0] == PackageManager.PERMISSION_GRANTED
         
-        updatePermissionStatus(granted)
-        
-        if (granted) {
-            Log.d(TAG, "Permiso ACTIVITY_RECOGNITION concedido")
-            logStatus("Permiso concedido. Iniciando Activity Recognition...")
-            startActivityRecognition()
-        } else {
-            Log.w(TAG, "Permiso ACTIVITY_RECOGNITION denegado")
-            logStatus("Permiso denegado. La app no funcionará correctamente.")
-            Toast.makeText(
-                this,
-                getString(R.string.permission_required),
-                Toast.LENGTH_LONG
-            ).show()
+        if (requestCode == this.requestCode) {
+            val granted = grantResults.isNotEmpty() && 
+                grantResults.any { it == PackageManager.PERMISSION_GRANTED }
+            
+            updatePermissionStatus(granted)
+            
+            if (granted) {
+                Log.d(TAG, "Permisos de ubicación concedidos")
+                logStatus("Permisos concedidos. Obteniendo ubicación...")
+                startLocationUpdates()
+            } else {
+                Log.w(TAG, "Permisos de ubicación denegados")
+                logStatus("Permisos denegados. La app no funcionará correctamente.")
+                Toast.makeText(
+                    this,
+                    "Se requieren permisos de ubicación para usar esta app",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
         }
     }
     
@@ -173,12 +270,10 @@ class MainActivity : AppCompatActivity() {
         if (resultCode != ConnectionResult.SUCCESS) {
             val errorMsg = apiAvailability.getErrorString(resultCode)
             logStatus("Google Play Services no disponible: $errorMsg")
-            apiStatusTextView.text = "Google Play Services: ❌ No disponible"
-            apiStatusTextView.setTextColor(getColor(android.R.color.holo_red_dark))
+            gpsStatusTextView.text = "Google Play Services: ❌ No disponible"
+            gpsStatusTextView.setTextColor(getColor(android.R.color.holo_red_dark))
         } else {
             logStatus("Google Play Services disponible ✓")
-            apiStatusTextView.text = "Google Play Services: ✓ Disponible"
-            apiStatusTextView.setTextColor(getColor(android.R.color.holo_green_dark))
         }
     }
     
@@ -195,16 +290,14 @@ class MainActivity : AppCompatActivity() {
         )
     }
     
-    private fun updateApiStatus(success: Boolean, error: String?) {
-        val statusText = if (success) {
-            "Activity Recognition: ✓ Activo"
-        } else {
-            "Activity Recognition: ❌ Error${if (error != null) ": $error" else ""}"
-        }
-        apiStatusTextView.text = statusText
-        apiStatusTextView.setTextColor(
-            if (success) getColor(android.R.color.holo_green_dark)
-            else getColor(android.R.color.holo_red_dark)
+    private fun updateGpsStatus(status: String) {
+        gpsStatusTextView.text = status
+        gpsStatusTextView.setTextColor(
+            when {
+                status.contains("✓") -> getColor(android.R.color.holo_green_dark)
+                status.contains("❌") -> getColor(android.R.color.holo_red_dark)
+                else -> getColor(android.R.color.holo_orange_dark)
+            }
         )
     }
     
@@ -219,11 +312,7 @@ class MainActivity : AppCompatActivity() {
     
     override fun onDestroy() {
         super.onDestroy()
-        if (::activityRecognitionClient.isInitialized && ::pendingIntent.isInitialized) {
-            activityRecognitionClient.removeActivityUpdates(pendingIntent)
-        }
-        LocalBroadcastManager.getInstance(this).unregisterReceiver(activityUpdateReceiver)
+        cancellationTokenSource.cancel()
+        // Las actualizaciones se detendrán automáticamente cuando se destruya la actividad
     }
 }
-
-

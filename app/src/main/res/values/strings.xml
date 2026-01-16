@@ -1,10 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Fitness Activity</string>
-    <string name="activity_detecting">Detectando actividad...</string>
-    <string name="activity_unknown">Actividad desconocida</string>
-    <string name="permission_required">Se requiere permiso para detectar actividad</string>
-    <string name="confidence">Confianza: %1$d%%</string>
+    <string name="app_name">GPS Coordinates</string>
 </resources>
 
 

@@ -2,8 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permiso para detectar actividad del usuario -->
-    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <!-- Permisos para acceso a ubicación GPS -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
         android:allowBackup="true"
@@ -23,10 +24,6 @@
             </intent-filter>
         </activity>
 
-        <!-- BroadcastReceiver para recibir actualizaciones de actividad -->
-        <receiver
-            android:name=".ActivityRecognitionReceiver"
-            android:exported="false" />
     </application>
 
 </manifest>
