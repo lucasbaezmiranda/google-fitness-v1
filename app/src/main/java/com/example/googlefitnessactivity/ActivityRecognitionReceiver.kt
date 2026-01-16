@@ -16,7 +16,7 @@ class ActivityRecognitionReceiver : BroadcastReceiver() {
     }
     
     override fun onReceive(context: Context?, intent: Intent?) {
-        if (ActivityRecognitionResult.hasResult(intent)) {
+        if (intent != null && ActivityRecognitionResult.hasResult(intent)) {
             val result = ActivityRecognitionResult.extractResult(intent)
             val mostProbableActivity: DetectedActivity? = result?.mostProbableActivity
             
@@ -25,11 +25,13 @@ class ActivityRecognitionReceiver : BroadcastReceiver() {
                 val confidence = activity.confidence
                 
                 // Enviar broadcast local a MainActivity
-                val updateIntent = Intent(ACTION_ACTIVITY_UPDATE).apply {
-                    putExtra(EXTRA_ACTIVITY_TYPE, getActivityTypeString(activityType))
-                    putExtra(EXTRA_CONFIDENCE, confidence)
+                if (context != null) {
+                    val updateIntent = Intent(ACTION_ACTIVITY_UPDATE).apply {
+                        putExtra(EXTRA_ACTIVITY_TYPE, getActivityTypeString(activityType))
+                        putExtra(EXTRA_CONFIDENCE, confidence)
+                    }
+                    LocalBroadcastManager.getInstance(context).sendBroadcast(updateIntent)
                 }
-                LocalBroadcastManager.getInstance(context!!).sendBroadcast(updateIntent)
             }
         }
     }
@@ -48,4 +50,5 @@ class ActivityRecognitionReceiver : BroadcastReceiver() {
         }
     }
 }
+
 
