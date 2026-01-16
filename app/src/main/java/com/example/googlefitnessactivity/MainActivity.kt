@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -21,6 +22,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var confidenceTextView: TextView
     
     private val requestCode = 123
+    private val TAG = "MainActivity"
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,12 +37,14 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.ACTIVITY_RECOGNITION
             ) != PackageManager.PERMISSION_GRANTED
         ) {
+            Log.d(TAG, "Solicitando permiso ACTIVITY_RECOGNITION")
             ActivityCompat.requestPermissions(
                 this,
                 arrayOf(Manifest.permission.ACTIVITY_RECOGNITION),
                 requestCode
             )
         } else {
+            Log.d(TAG, "Permiso ACTIVITY_RECOGNITION ya concedido")
             startActivityRecognition()
         }
         
@@ -56,6 +60,7 @@ class MainActivity : AppCompatActivity() {
             val activityType = intent?.getStringExtra(ActivityRecognitionReceiver.EXTRA_ACTIVITY_TYPE) ?: ""
             val confidence = intent?.getIntExtra(ActivityRecognitionReceiver.EXTRA_CONFIDENCE, 0) ?: 0
             
+            Log.d(TAG, "Actividad recibida: $activityType con confianza: $confidence%")
             updateUI(activityType, confidence)
         }
     }
@@ -80,22 +85,32 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun startActivityRecognition() {
-        activityRecognitionClient = ActivityRecognition.getClient(this)
-        val intent = Intent(this, ActivityRecognitionReceiver::class.java)
-        pendingIntent = android.app.PendingIntent.getBroadcast(
-            this,
-            0,
-            intent,
-            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-        )
-        
-        // Solicitar actualizaciones cada 5 segundos
-        activityRecognitionClient.requestActivityUpdates(
-            5000, // intervalo en milisegundos
-            pendingIntent
-        )
-        
-        activityTextView.text = getString(R.string.activity_detecting)
+        try {
+            activityRecognitionClient = ActivityRecognition.getClient(this)
+            val intent = Intent(this, ActivityRecognitionReceiver::class.java)
+            pendingIntent = android.app.PendingIntent.getBroadcast(
+                this,
+                0,
+                intent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            
+            // Solicitar actualizaciones cada 10 segundos (mínimo recomendado: 5-10 segundos)
+            // Nota: Activity Recognition funciona mejor en dispositivos físicos
+            activityRecognitionClient.requestActivityUpdates(
+                10000, // intervalo en milisegundos (10 segundos)
+                pendingIntent
+            ).addOnSuccessListener {
+                Log.d(TAG, "Activity Recognition iniciado correctamente")
+                activityTextView.text = getString(R.string.activity_detecting)
+            }.addOnFailureListener { e ->
+                Log.e(TAG, "Error al iniciar Activity Recognition: ${e.message}", e)
+                Toast.makeText(this, "Error al iniciar detección de actividad: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Excepción al iniciar Activity Recognition: ${e.message}", e)
+            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
     
     override fun onRequestPermissionsResult(
@@ -107,8 +122,10 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == this.requestCode && grantResults.isNotEmpty() &&
             grantResults[0] == PackageManager.PERMISSION_GRANTED
         ) {
+            Log.d(TAG, "Permiso ACTIVITY_RECOGNITION concedido")
             startActivityRecognition()
         } else {
+            Log.w(TAG, "Permiso ACTIVITY_RECOGNITION denegado")
             Toast.makeText(
                 this,
                 getString(R.string.permission_required),
@@ -125,4 +142,5 @@ class MainActivity : AppCompatActivity() {
         LocalBroadcastManager.getInstance(this).unregisterReceiver(activityUpdateReceiver)
     }
 }
+
 
