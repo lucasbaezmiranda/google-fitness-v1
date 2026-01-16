@@ -116,3 +116,4 @@ google-fitness-v1/
 
 Este es un proyecto de ejemplo educativo. Siéntete libre de usarlo y modificarlo según tus necesidades.
 
+

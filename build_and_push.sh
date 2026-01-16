@@ -15,7 +15,7 @@ if [ -z "$LAST_VERSION" ]; then
 else
     NEXT_VERSION=$((LAST_VERSION + 1))
 fi
-FILENAME="google-fitness-activity-v${NEXT_VERSION}.apk"
+FILENAME="fitness-activity-v${NEXT_VERSION}.apk"
 
 # 4. Compilar el APK
 echo "--- Iniciando compilación de $FILENAME ---"
@@ -41,4 +41,5 @@ else
     echo "❌ Error en la compilación. El proceso se detuvo."
     exit 1
 fi
+
 

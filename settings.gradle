@@ -13,6 +13,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "GoogleFitnessActivity"
+rootProject.name = "FitnessActivity"
 include ':app'
+
 
