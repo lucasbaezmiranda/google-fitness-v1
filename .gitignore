@@ -86,4 +86,7 @@ lint/outputs/
 lint/tmp/
 # lint/reports/
 
+# Old app folder
+old_app/
+
 
