@@ -4,6 +4,9 @@
 *.ap_
 *.aab
 
+# But allow APKs in releases folder
+!releases/*.apk
+
 # Files for the ART/Dalvik VM
 *.dex
 
@@ -82,4 +85,5 @@ lint/generated/
 lint/outputs/
 lint/tmp/
 # lint/reports/
+
 
