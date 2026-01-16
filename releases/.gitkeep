@@ -1,0 +1,3 @@
+# Esta carpeta contiene los APKs compilados y versionados
+# Los archivos .apk serán añadidos por el script build_and_push.sh
+
