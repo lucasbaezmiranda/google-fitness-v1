@@ -1,9 +1,13 @@
 package com.example.googlefitnessactivity
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
+import android.location.LocationManager
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import android.widget.TextView
 import android.widget.Toast
@@ -97,37 +101,21 @@ class MainActivity : AppCompatActivity() {
             return
         }
         
+        // Verificar si el GPS está habilitado
+        if (!isLocationEnabled()) {
+            Toast.makeText(this, "Por favor activa tu ubicación...", Toast.LENGTH_LONG).show()
+            val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            startActivity(intent)
+            updateGpsStatus("GPS: ⚠ Desactivado")
+            logStatus("GPS desactivado. Abriendo configuración...")
+            return
+        }
+        
         try {
             updateGpsStatus("Obteniendo ubicación...")
             
-            // Solicitar ubicación con alta precisión
-            fusedLocationClient.getCurrentLocation(
-                Priority.PRIORITY_HIGH_ACCURACY,
-                cancellationTokenSource.token
-            ).addOnSuccessListener { location: Location? ->
-                if (location != null) {
-                    updatesCount++
-                    Log.d(TAG, "Ubicación obtenida: lat=${location.latitude}, lng=${location.longitude}")
-                    logStatus("Ubicación actualizada (${updatesCount} actualizaciones)")
-                    updateLocationUI(location)
-                    updateGpsStatus("GPS: ✓ Activo")
-                    updateUpdatesCount()
-                } else {
-                    Log.w(TAG, "Ubicación es null")
-                    logStatus("No se pudo obtener la ubicación")
-                    updateGpsStatus("GPS: ⚠ Sin señal")
-                    
-                    // Intentar obtener última ubicación conocida
-                    getLastKnownLocation()
-                }
-            }.addOnFailureListener { e ->
-                Log.e(TAG, "Error al obtener ubicación: ${e.message}", e)
-                logStatus("Error: ${e.message}")
-                updateGpsStatus("GPS: ❌ Error")
-                
-                // Intentar obtener última ubicación conocida
-                getLastKnownLocation()
-            }
+            // Primero intentar obtener la última ubicación conocida (más rápido)
+            getLastKnownLocation()
             
             // Configurar actualizaciones periódicas cada 5 segundos
             requestLocationUpdates()
@@ -139,6 +127,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
+    private fun isLocationEnabled(): Boolean {
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+               locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+    }
+    
     private fun getLastKnownLocation() {
         if (!hasLocationPermission()) return
         
@@ -147,13 +141,46 @@ class MainActivity : AppCompatActivity() {
                 if (location != null) {
                     updatesCount++
                     Log.d(TAG, "Última ubicación conocida: lat=${location.latitude}, lng=${location.longitude}")
-                    logStatus("Última ubicación conocida obtenida")
+                    logStatus("Ubicación obtenida (${updatesCount} actualizaciones)")
                     updateLocationUI(location)
-                    updateGpsStatus("GPS: ✓ Última ubicación")
+                    updateGpsStatus("GPS: ✓ Activo")
+                    updateUpdatesCount()
                 } else {
-                    logStatus("No hay ubicación disponible aún")
+                    logStatus("No hay ubicación disponible. Solicitando nueva ubicación...")
                     updateGpsStatus("GPS: ⚠ Esperando señal...")
+                    // Si no hay última ubicación, solicitar una nueva
+                    requestNewLocation()
                 }
+            }
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Error de seguridad: ${e.message}", e)
+        }
+    }
+    
+    private fun requestNewLocation() {
+        if (!hasLocationPermission()) return
+        
+        try {
+            // Solicitar ubicación con alta precisión
+            fusedLocationClient.getCurrentLocation(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                cancellationTokenSource.token
+            ).addOnSuccessListener { location: Location? ->
+                if (location != null) {
+                    updatesCount++
+                    Log.d(TAG, "Nueva ubicación obtenida: lat=${location.latitude}, lng=${location.longitude}")
+                    logStatus("Nueva ubicación obtenida (${updatesCount} actualizaciones)")
+                    updateLocationUI(location)
+                    updateGpsStatus("GPS: ✓ Activo")
+                    updateUpdatesCount()
+                } else {
+                    logStatus("No se pudo obtener nueva ubicación")
+                    updateGpsStatus("GPS: ⚠ Sin señal")
+                }
+            }.addOnFailureListener { e ->
+                Log.e(TAG, "Error al obtener nueva ubicación: ${e.message}", e)
+                logStatus("Error: ${e.message}")
+                updateGpsStatus("GPS: ❌ Error")
             }
         } catch (e: SecurityException) {
             Log.e(TAG, "Error de seguridad: ${e.message}", e)
@@ -308,6 +335,14 @@ class MainActivity : AppCompatActivity() {
     private fun logStatus(message: String) {
         Log.d(TAG, "Status: $message")
         lastLogTextView.text = "Último log: $message"
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        // Volver a obtener ubicación cuando la app vuelve al foreground
+        if (hasLocationPermission()) {
+            getLastKnownLocation()
+        }
     }
     
     override fun onDestroy() {
