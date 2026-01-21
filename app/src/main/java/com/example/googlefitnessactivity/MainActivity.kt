@@ -6,24 +6,30 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
     
     private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private lateinit var locationLogger: LocationLogger
     private lateinit var latitudeTextView: TextView
     private lateinit var longitudeTextView: TextView
     private lateinit var accuracyTextView: TextView
@@ -33,6 +39,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var gpsStatusTextView: TextView
     private lateinit var updatesCountTextView: TextView
     private lateinit var lastLogTextView: TextView
+    private lateinit var exportButton: Button
     
     private var updatesCount = 0
     private val requestCode = 123
@@ -52,8 +59,15 @@ class MainActivity : AppCompatActivity() {
         gpsStatusTextView = findViewById(R.id.gpsStatusTextView)
         updatesCountTextView = findViewById(R.id.updatesCountTextView)
         lastLogTextView = findViewById(R.id.lastLogTextView)
+        exportButton = findViewById(R.id.exportButton)
         
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        locationLogger = LocationLogger(this)
+        
+        // Configurar botón de exportar
+        exportButton.setOnClickListener {
+            exportAndShareData()
+        }
         
         // Verificar Google Play Services
         checkGooglePlayServices()
@@ -143,6 +157,8 @@ class MainActivity : AppCompatActivity() {
                     Log.d(TAG, "Última ubicación conocida: lat=${location.latitude}, lng=${location.longitude}")
                     logStatus("Ubicación obtenida (${updatesCount} actualizaciones)")
                     updateLocationUI(location)
+                    // Registrar ubicación en el archivo
+                    locationLogger.logLocation(location)
                     updateGpsStatus("GPS: ✓ Activo")
                     updateUpdatesCount()
                 } else {
@@ -171,6 +187,8 @@ class MainActivity : AppCompatActivity() {
                     Log.d(TAG, "Nueva ubicación obtenida: lat=${location.latitude}, lng=${location.longitude}")
                     logStatus("Nueva ubicación obtenida (${updatesCount} actualizaciones)")
                     updateLocationUI(location)
+                    // Registrar ubicación en el archivo
+                    locationLogger.logLocation(location)
                     updateGpsStatus("GPS: ✓ Activo")
                     updateUpdatesCount()
                 } else {
@@ -191,13 +209,13 @@ class MainActivity : AppCompatActivity() {
         if (!hasLocationPermission()) return
         
         try {
-            // Crear LocationRequest para actualizaciones periódicas
+            // Crear LocationRequest para actualizaciones periódicas cada 30 segundos
             val locationRequest = com.google.android.gms.location.LocationRequest.Builder(
                 Priority.PRIORITY_HIGH_ACCURACY,
-                5000 // intervalo de 5 segundos
+                30000 // intervalo de 30 segundos cuando la app está abierta
             ).apply {
-                setMinUpdateIntervalMillis(3000) // actualización mínima de 3 segundos
-                setMaxUpdateDelayMillis(10000) // máximo delay de 10 segundos
+                setMinUpdateIntervalMillis(30000) // actualización mínima de 30 segundos
+                setMaxUpdateDelayMillis(60000) // máximo delay de 60 segundos
             }.build()
             
             val locationCallback = object : com.google.android.gms.location.LocationCallback() {
@@ -207,6 +225,8 @@ class MainActivity : AppCompatActivity() {
                         Log.d(TAG, "Actualización periódica: lat=${location.latitude}, lng=${location.longitude}")
                         logStatus("Actualización periódica (${updatesCount} actualizaciones)")
                         updateLocationUI(location)
+                        // Registrar ubicación en el archivo
+                        locationLogger.logLocation(location)
                         updateGpsStatus("GPS: ✓ Activo")
                         updateUpdatesCount()
                     }
@@ -343,6 +363,112 @@ class MainActivity : AppCompatActivity() {
         if (hasLocationPermission()) {
             getLastKnownLocation()
         }
+    }
+    
+    private fun exportAndShareData() {
+        val logCount = locationLogger.getLogCount()
+        if (logCount == 0) {
+            Toast.makeText(this, "No hay datos GPS registrados aún", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val options = arrayOf("Compartir por WhatsApp", "Compartir por Correo", "Ver datos")
+        AlertDialog.Builder(this)
+            .setTitle("Exportar datos GPS")
+            .setMessage("Total de registros: $logCount")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> shareViaWhatsApp()
+                    1 -> shareViaEmail()
+                    2 -> showDataDialog()
+                }
+            }
+            .show()
+    }
+    
+    private fun shareViaWhatsApp() {
+        try {
+            val logFile = locationLogger.getLogFile()
+            if (!logFile.exists()) {
+                Toast.makeText(this, "No hay archivo para compartir", Toast.LENGTH_SHORT).show()
+                return
+            }
+            
+            val uri = FileProvider.getUriForFile(
+                this,
+                "${packageName}.fileprovider",
+                logFile
+            )
+            
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_TEXT, "Registro GPS - ${locationLogger.getLogCount()} ubicaciones")
+                setPackage("com.whatsapp")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            
+            if (intent.resolveActivity(packageManager) != null) {
+                startActivity(intent)
+            } else {
+                // Si WhatsApp no está instalado, usar compartir genérico
+                shareGeneric(uri)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error al compartir por WhatsApp: ${e.message}", e)
+            Toast.makeText(this, "Error al compartir: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    private fun shareViaEmail() {
+        try {
+            val logFile = locationLogger.getLogFile()
+            if (!logFile.exists()) {
+                Toast.makeText(this, "No hay archivo para compartir", Toast.LENGTH_SHORT).show()
+                return
+            }
+            
+            val uri = FileProvider.getUriForFile(
+                this,
+                "${packageName}.fileprovider",
+                logFile
+            )
+            
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, "Registro GPS - ${locationLogger.getLogCount()} ubicaciones")
+                putExtra(Intent.EXTRA_TEXT, "Adjunto encontrarás el registro de ubicaciones GPS.")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            
+            startActivity(Intent.createChooser(intent, "Compartir por correo"))
+        } catch (e: Exception) {
+            Log.e(TAG, "Error al compartir por correo: ${e.message}", e)
+            Toast.makeText(this, "Error al compartir: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    private fun shareGeneric(uri: Uri) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_TEXT, "Registro GPS - ${locationLogger.getLogCount()} ubicaciones")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "Compartir datos GPS"))
+    }
+    
+    private fun showDataDialog() {
+        val content = locationLogger.formatLogForSharing()
+        AlertDialog.Builder(this)
+            .setTitle("Datos GPS registrados")
+            .setMessage(content)
+            .setPositiveButton("Cerrar", null)
+            .setNeutralButton("Compartir") { _, _ ->
+                shareViaWhatsApp()
+            }
+            .show()
     }
     
     override fun onDestroy() {
